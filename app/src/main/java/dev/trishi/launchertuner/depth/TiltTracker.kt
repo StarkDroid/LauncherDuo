@@ -78,6 +78,7 @@ class TiltTracker(
     private var primed = false
 
     private var depth = 0f
+    private var lastReported = 0f
     private var lastTimestamp = 0L
 
     fun start(): Boolean {
@@ -185,6 +186,18 @@ class TiltTracker(
         val target = PoseCalibration.foldFor(filtered, DepthEngine.maxAngle, strayed)
         if (target == 0f && abs(filtered) > PoseCalibration.DEAD_ZONE_DEG) {
             warn(strayed)
+        }
+
+        // Every few degrees of turn, say what the two measurements agree on. When a
+        // fold misbehaves somewhere out there, this is the line that explains it.
+        if (abs(yaw - lastReported) >= 3f) {
+            lastReported = yaw
+            android.util.Log.d(
+                "TunerDepth",
+                "yaw " + String.format("%6.1f", yaw) + "°  moved " +
+                    String.format("%5.1f", strayed) + "°  fold " +
+                    String.format("%.2f", depth),
+            )
         }
 
         // Ease the effect itself: the angle may move quickly, but the warp should
