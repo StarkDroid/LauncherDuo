@@ -61,6 +61,10 @@ class GestureService : AccessibilityService() {
         }
         DepthEngine.addListener(depthListener)
         registerScreenReceiver()
+        // Never resume on our own after a reboot or a service rebind. The user
+        // switches it on, which is also what forces a fresh calibration for the
+        // way they are holding the phone right now.
+        prefs(this).edit().putBoolean(KEY_ENABLED, false).apply()
         apply()
     }
 

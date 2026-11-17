@@ -47,6 +47,13 @@ window content, text, keystrokes or notification data is read, stored or
 transmitted. Screenshots are held in memory and released as soon as the home screen
 leaves the foreground. There is no internet permission.
 
+## Turning it on
+
+The effect never resumes by itself after a reboot or an accessibility rebind — the
+switch has to be flipped in the app. That is deliberate: enabling it starts a fresh
+calibration of how the phone is being held, so the fold is measured against the
+pose you are actually using rather than one captured days ago.
+
 ## Build
 
 ```bash
