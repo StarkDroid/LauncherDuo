@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Launcher DUO</string>
+    <string name="gesture_service_label">Launcher DUO effect</string>
+    <string name="accessibility_description">Draws the fold over the home screen and takes the single screenshot the effect needs. Window content is never read.</string>
+    <string name="lock_tile_label">Lock screen</string>
+</resources>
