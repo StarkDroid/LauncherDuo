@@ -153,7 +153,7 @@ class GestureService : AccessibilityService() {
 
     fun apply() {
         val wanted = prefs(this).getBoolean(KEY_ENABLED, false)
-        DepthEngine.maxAngle = prefs(this).getFloat(KEY_ANGLE, 28f)
+        DepthEngine.maxAngle = prefs(this).getFloat(KEY_ANGLE, 28f).coerceAtLeast(MIN_ANGLE)
         DepthEngine.strength = prefs(this).getFloat(KEY_STRENGTH, 1f)
         if (!wanted) {
             removeOverlay()
@@ -378,6 +378,9 @@ class GestureService : AccessibilityService() {
         const val PREFS = "duo"
         const val KEY_ENABLED = "enabled"
         const val KEY_ANGLE = "angle"
+
+        /** Below this the ramp out of the 10° dead zone is too short to feel gradual. */
+        const val MIN_ANGLE = 16f
         const val KEY_STRENGTH = "strength"
         private const val LAUNCHER = "com.google.android.apps.nexuslauncher"
         private const val SETTLE_MS = 250L

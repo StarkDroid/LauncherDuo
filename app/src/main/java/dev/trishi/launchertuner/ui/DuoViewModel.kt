@@ -14,7 +14,7 @@ class DuoViewModel(app: Application) : AndroidViewModel(app) {
 
     var enabled by mutableStateOf(prefs.getBoolean(GestureService.KEY_ENABLED, false))
         private set
-    var angle by mutableStateOf(prefs.getFloat(GestureService.KEY_ANGLE, 28f))
+    var angle by mutableStateOf(prefs.getFloat(GestureService.KEY_ANGLE, 28f).coerceAtLeast(GestureService.MIN_ANGLE))
         private set
     var strength by mutableStateOf(prefs.getFloat(GestureService.KEY_STRENGTH, 1f))
         private set

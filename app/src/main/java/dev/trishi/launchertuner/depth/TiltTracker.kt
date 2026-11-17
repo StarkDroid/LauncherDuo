@@ -8,6 +8,7 @@ import android.hardware.SensorManager
 import android.os.SystemClock
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.acos
 import kotlin.math.exp
 
 /**
@@ -57,6 +58,8 @@ class TiltTracker(
     private var armed = false
     private var calibrating = false
     private var neutralAzimuth = 0f
+    private val neutralRotation = FloatArray(9)
+    private var warnedAt = 0L
 
     // Calibration window: heading samples, in degrees relative to the sample that
     // opened the window, so the ±180° seam of a compass reading cannot cut it in
@@ -167,6 +170,28 @@ class TiltTracker(
             return
         }
 
+        // A signed heading needs an axis convention, and a wrong one reads a turn
+        // where there is none — which is what made the fold snap to one side the
+        // moment it said it was ready. This angle is the trace of the two attitudes
+        // multiplied together: the same number whichever way the axes are ordered,
+        // and exactly 0 at the pose that was committed. So nothing bends until the
+        // phone has physically left that pose, whatever the heading claims.
+        val strayed = Math.toDegrees(angleBetween(neutralRotation, rotation).toDouble()).toFloat()
+        if (strayed < HOLD_RELEASE_DEG && abs(filtered) > DEAD_ZONE_DEG) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - warnedAt > 2000L) {
+                warnedAt = now
+                android.util.Log.w(
+                    "TunerDepth",
+                    "heading claims " + String.format("%.1f", filtered) +
+                        "° while the phone has not moved " + String.format("%.1f", strayed) + "°",
+                )
+            }
+            depth = 0f
+            onChange(filtered, 0f)
+            return
+        }
+
         val raw = yawFromNeutral()
         if (!primed) {
             filtered = raw
@@ -244,6 +269,7 @@ class TiltTracker(
 
     private fun commitCentre(azimuth: Float) {
         neutralAzimuth = azimuth
+        for (i in 0 until 9) neutralRotation[i] = rotation[i]
         depth = 0f
         filtered = 0f
         lastRaw = 0f
@@ -272,6 +298,17 @@ class TiltTracker(
     /** Signed turn away from the captured pose, zero while the phone is not moved. */
     private fun yawFromNeutral(): Float =
         wrapDegrees(Math.toDegrees((angles[0] - neutralAzimuth).toDouble()).toFloat())
+
+    /** Angle in radians between two attitudes; invariant to the axis convention. */
+    private fun angleBetween(a: FloatArray, b: FloatArray): Float {
+        var trace = 0f
+        for (i in 0 until 3) {
+            for (j in 0 until 3) {
+                trace += a[j * 3 + i] * b[j * 3 + i]
+            }
+        }
+        return acos(((trace - 1f) / 2f).coerceIn(-1f, 1f))
+    }
 
     /**
      * One-euro filter: cutoff rises with the filtered derivative, so slow motion
@@ -303,6 +340,8 @@ class TiltTracker(
         const val STEADY_DEG = 4f
 
         const val DEAD_ZONE_DEG = 10f
+        /** How far the phone must physically move from the committed pose at all. */
+        const val HOLD_RELEASE_DEG = 4f
 
         // One-euro tuning.
         const val MIN_CUTOFF = 0.7f

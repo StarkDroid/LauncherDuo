@@ -131,8 +131,8 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
                 Slider(
                     value = vm.angle,
                     onValueChange = { vm.updateAngle(it) },
-                    valueRange = 12f..45f,
-                    steps = 32,
+                    valueRange = 16f..45f,
+                    steps = 28,
                 )
 
                 Text("Warp amount", style = MaterialTheme.typography.titleSmall)

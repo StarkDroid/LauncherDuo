@@ -74,6 +74,11 @@ leaves the foreground. There is no internet permission.
    not enter the signal at all.
 5. The heading is only read while the screen faces sideways, within 45° of the
    horizon: a phone lying flat or facing the ceiling has no meaningful left turn.
+   On top of that, nothing bends until the phone has physically left the committed
+   attitude by 4°. That second check is the angle between two attitudes — a trace,
+   the same number whichever way the platform orders its axes — so a signed heading
+   that is somehow wrong cannot produce a fold on its own. When the two disagree the
+   service logs it instead of warping.
 6. A tap, or pulling down the shade, hides the fold instantly and re-runs step 3,
    rate limited to one recalibration per 1.2 s. Launcher content changes only count
    while the fold is actually on screen: the clock and the At a Glance card repaint
