@@ -47,6 +47,25 @@ window content, text, keystrokes or notification data is read, stored or
 transmitted. Screenshots are held in memory and released as soon as the home screen
 leaves the foreground. There is no internet permission.
 
+## Calibration lifecycle
+
+1. Flipping the switch **in the app** does not calibrate anything. It arms the
+   service and sets a "waiting for the home screen" flag; the overlay stays hidden
+   even if the sensors move.
+2. The gate is decided by the **focused window**, polled every 250 ms
+   (`rootInActiveWindow`, falling back to the window list). Window-state events are
+   used only as a fast path and deliberately ignore our own package, because the
+   overlay window would otherwise toggle the gate and the effect would stutter at
+   1 Hz.
+3. When the launcher is confirmed in front, calibration starts: a 900 ms window
+   that must see at least 8 samples with the yaw staying inside a 3° spread. If the
+   phone is still moving, the window restarts instead of guessing. A toast reports
+   "Recalibrating the fold…" and then "Fold ready".
+4. Yaw is only interpreted while the screen is roughly vertical; facing the ceiling
+   makes `atan2(x, z)` ill-conditioned and would report a phantom turn.
+5. A tap or a launcher content change hides the fold instantly and re-runs steps
+   3-4, rate limited to one recalibration per 1.5 s.
+
 ## Turning it on
 
 The effect never resumes by itself after a reboot or an accessibility rebind — the

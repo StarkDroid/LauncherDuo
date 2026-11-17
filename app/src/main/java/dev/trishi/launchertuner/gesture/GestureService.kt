@@ -32,6 +32,7 @@ class GestureService : AccessibilityService() {
     private var captureInFlight = false
     private var homeSince = 0L
     private var onHome = false
+    private var awaitHome = false
     private var lastRecalibrationAt = 0L
 
     private val depthListener: () -> Unit = listener@{
@@ -39,7 +40,7 @@ class GestureService : AccessibilityService() {
         // The tracker keeps publishing while you are in any app, so the gate has
         // to be checked here as well: nothing is drawn unless the launcher owns
         // the foreground.
-        val visible = onHome && DepthEngine.depth > 0.002f && !isLocked()
+        val visible = onHome && !awaitHome && DepthEngine.depth > 0.002f && !isLocked()
         val wanted = if (visible) View.VISIBLE else View.INVISIBLE
         if (view.visibility != wanted) view.visibility = wanted
         if (visible) {
@@ -70,6 +71,8 @@ class GestureService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val type = event?.eventType ?: return
+        val pkgFromEvent = event.packageName?.toString()
+        if (pkgFromEvent == packageName) return
         val interaction = type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
             type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
         if (interaction) {
@@ -85,8 +88,8 @@ class GestureService : AccessibilityService() {
             return
         }
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName || pkg == "com.android.systemui" || pkg == "android") return
+        val pkg = pkgFromEvent ?: return
+        if (pkg == "com.android.systemui" || pkg == "android") return
         applyHome(pkg == LAUNCHER)
     }
 
@@ -95,8 +98,17 @@ class GestureService : AccessibilityService() {
      * reliably after the service is re-bound, and a stale "on home" flag made the
      * overlay appear inside this app; polling the package is deterministic.
      */
-    private fun foregroundPackage(): String? =
-        runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+    private fun foregroundPackage(): String? {
+        runCatching { rootInActiveWindow?.packageName?.toString() }
+            .getOrNull()
+            ?.let { return it }
+        // Some transitions leave no active root; the window list still knows
+        // which application window is on top.
+        return runCatching {
+            windows.firstOrNull { it.isActive && it.type == WindowManager.LayoutParams.TYPE_APPLICATION }
+                ?.root?.packageName?.toString()
+        }.getOrNull()
+    }
 
     override fun onInterrupt() = Unit
 
@@ -122,7 +134,9 @@ class GestureService : AccessibilityService() {
         DepthEngine.enabled = true
         DepthEngine.reset()
         DepthEngine.clearFrame()
-        tilt.beginRecalibration()
+        // Calibration is deferred until the launcher is confirmed in front, so
+        // flipping the switch inside this app never measures the wrong pose.
+        awaitHome = true
         if (overlay == null) addOverlay()
         if (tilt.start()) startCaptureLoop()
     }
@@ -165,10 +179,10 @@ class GestureService : AccessibilityService() {
     }
 
     private fun captureLoop() {
+        // The focused window is never our own overlay (it is not focusable), so
+        // the poll can treat this app as a real "left home" transition.
         foregroundPackage()?.let { pkg ->
-            // Ignore transient framework windows; only a real app package can
-            // change the answer.
-            if (pkg != packageName && pkg != "com.android.systemui" && pkg != "android") {
+            if (pkg != "com.android.systemui" && pkg != "android") {
                 applyHome(pkg == LAUNCHER)
             }
         }
@@ -219,9 +233,11 @@ class GestureService : AccessibilityService() {
         if (home == onHome) return
         onHome = home
         homeSince = if (home) SystemClock.elapsedRealtime() else 0L
-        if (home) {
-            // Arriving on the home screen re-learns the pose the same way a
-            // touch does: pause, watch, then commit.
+        if (home && (awaitHome || !tilt.isArmed())) {
+            // Arriving on the home screen is the only moment a centre is learned
+            // after enabling: pause, watch, then commit.
+            awaitHome = false
+            overlay?.visibility = View.INVISIBLE
             tilt.beginRecalibration()
         }
         if (!home) {

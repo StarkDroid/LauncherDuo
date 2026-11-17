@@ -231,6 +231,11 @@ class TiltTracker(
             if (t - calibStart >= CALIBRATION_MS) {
                 val steady = calibMax - calibMin <= CALIB_TOLERANCE_DEG && calibCount >= 8
                 if (steady) {
+                    android.util.Log.d(
+                        "TunerDepth",
+                        "centre committed, spread=" + String.format("%.1f", calibMax - calibMin) +
+                            " over " + (t - calibStart) + "ms",
+                    )
                     calibrate()
                     calibrating = false
                     armed = true
@@ -239,6 +244,7 @@ class TiltTracker(
                     onStatus?.invoke("ready")
                 } else {
                     // Still moving: restart the window instead of guessing.
+                    android.util.Log.d("TunerDepth", "calibration window unstable, retrying")
                     calibStart = 0L
                 }
             }
