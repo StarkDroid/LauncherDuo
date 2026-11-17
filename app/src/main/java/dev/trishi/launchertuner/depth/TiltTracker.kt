@@ -9,30 +9,35 @@ import android.os.SystemClock
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.acos
-import kotlin.math.atan2
 import kotlin.math.exp
-import kotlin.math.sqrt
+import kotlin.math.max
 
 /**
- * Horizontal tilt, armed by stillness, smoothed by a one-euro filter.
+ * How far the phone has been turned left or right, measured against a calibrated
+ * centre.
  *
- * Method:
+ * The signal is built entirely from Android's own attitude geometry:
  *
- * 1. `TYPE_GAME_ROTATION_VECTOR` is a fused accelerometer + gyroscope attitude.
- *    Successive matrices give angular speed:
- *    `speed = acos((trace(Rprev⁻¹·R) − 1) / 2) / dt`.
- * 2. The phone is "held" when that speed stays under 15°/s for 450 ms. That pose
- *    becomes neutral; before it exists the effect is off.
- * 3. Tilt is `yaw + roll`, both in the neutral frame: yaw is the screen normal's
- *    sideways excursion, roll is gravity rotating in the screen plane. Summing
- *    them means turning the phone and tilting it like a steering wheel both work,
- *    and the signal never flaps between the two axes.
- * 4. The angle goes through a **one-euro filter** (adaptive low-pass): slow,
- *    deliberate tilts are smoothed hard; fast ones keep their latency. That is
- *    what removes the sensor jitter without making the effect feel laggy.
- * 5. Holding still re-zeroes the centre once and latches: the effect stays at
- *    zero until the phone leaves that pose by 5°, which keeps sensor noise from
- *    flickering it on and off around the stillness threshold.
+ * 1. `TYPE_GAME_ROTATION_VECTOR` (fused accelerometer + gyroscope) is turned into
+ *    a rotation matrix.
+ * 2. That matrix is remapped so the **direction the screen faces** becomes the
+ *    frame's vertical reference, and [SensorManager.getOrientation] reports it as
+ *    an azimuth plus a pitch. Reading the heading this way keeps the axis layout,
+ *    handedness and world frame inside the platform instead of in hand-written
+ *    matrix indexing.
+ * 3. Calibration stores the pose as [neutralAzimuth]. The effect is driven by
+ *    `azimuth − neutralAzimuth`, wrapped to ±180°, so the reading is exactly zero
+ *    at the captured pose and grows by the same amount in either direction:
+ *    positive one way, negative the other.
+ * 4. The pitch tells whether the screen is facing sideways at all. Pointed at the
+ *    ceiling or lying flat on a table, a heading has no meaning, so nothing is
+ *    published.
+ * 5. The angle goes through a **one-euro filter** (adaptive low-pass): a slow,
+ *    deliberate turn is smoothed hard, a fast one keeps its latency.
+ *
+ * The centre is only ever adopted by [beginRecalibration], which watches the
+ * sensor for a window and commits when the pose has not moved. Nothing else can
+ * change the zero.
  */
 class TiltTracker(
     context: Context,
@@ -45,26 +50,23 @@ class TiltTracker(
             ?: sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
 
     private val rotation = FloatArray(9)
-    private val previous = FloatArray(9)
-    private val neutral = FloatArray(9)
-    private var gravityNeutral = 0f
+    private val facing = FloatArray(9)
+    private val angles = FloatArray(3)
+    private val windowStart = FloatArray(9)
 
     private var hasSample = false
-    private var hasPrevious = false
     private var armed = false
-    private var pendingCentre = true
-
-    // Multi-pass calibration window.
     private var calibrating = false
-    private var calibStart = 0L
-    private var calibMin = 0f
-    private var calibMax = 0f
-    private var calibCount = 0
+    private var neutralAzimuth = 0f
 
-    /** Reports "start" when a recalibration begins and "ready" when it settles. */
+    // Calibration window: opened on the first sample after a request and committed
+    // only when the pose has stayed inside a small band for long enough.
+    private var windowOpenedAt = 0L
+    private var windowSamples = 0
+    private var windowWorst = 0f
+
+    /** Reports "start" when a recalibration begins and "ready" when it commits. */
     var onStatus: ((String) -> Unit)? = null
-    private var lastTimestamp = 0L
-    private var stillSince = 0L
 
     // One-euro filter state.
     private var filtered = 0f
@@ -72,10 +74,8 @@ class TiltTracker(
     private var lastRaw = 0f
     private var primed = false
 
-    // Slow drift washout, in degrees.
     private var depth = 0f
-    private var idle = false
-    private var stillScore = 0f
+    private var lastTimestamp = 0L
 
     fun start(): Boolean {
         val s = sensor
@@ -90,101 +90,80 @@ class TiltTracker(
 
     fun stop() {
         runCatching { sensors.unregisterListener(this) }
-        armed = false
-        hasPrevious = false
+        pause()
     }
 
     fun isArmed(): Boolean = armed
 
-    /** Ask for a fresh centre on the next steady, upright hold. */
-    fun requestRecentre() {
-        pendingCentre = true
+    /**
+     * Leave the whole calibration state behind. Used when the launcher is no
+     * longer in front, so a window opened at home can never commit later, inside
+     * another app.
+     */
+    fun pause() {
         armed = false
+        calibrating = false
+        closeWindow()
+        depth = 0f
         primed = false
+        DepthEngine.publishCentered(false)
     }
 
     /**
-     * Stop, watch the sensor for a moment, and only then adopt a centre. A single
-     * sample can catch the phone mid-motion, which is what made the fold resume
-     * from a wrong zero after a touch.
+     * Stop bending and learn a new centre: watch for [CALIBRATION_MS], require the
+     * pose to move less than [CALIB_TOLERANCE_DEG] across that window, and commit
+     * only then. An unsteady window is thrown away and started again rather than
+     * guessed at.
      */
     fun beginRecalibration() {
         calibrating = true
         armed = false
-        primed = false
+        closeWindow()
         depth = 0f
+        primed = false
         DepthEngine.publishCentered(false)
         DepthEngine.reset()
-    }
-
-    /** Adopt the current pose as neutral (Set neutral button / first hold). */
-    fun calibrate() {
-        if (!hasSample) return
-        for (i in 0 until 9) neutral[i] = rotation[i]
-        gravityNeutral = rawRoll()
-        armed = true
-        primed = false
-        stillSince = 0L
     }
 
     override fun onSensorChanged(event: SensorEvent) {
         val values = event.values
         if (values.size < 3) return
         SensorManager.getRotationMatrixFromVector(rotation, values)
+        SensorManager.remapCoordinateSystem(
+            rotation,
+            SensorManager.AXIS_X,
+            SensorManager.AXIS_Z,
+            facing,
+        )
+        SensorManager.getOrientation(facing, angles)
         hasSample = true
 
-        var haveRate = false
-        var speed = 0f
-        var dt = 0.02f
-        if (hasPrevious && lastTimestamp > 0L) {
-            val seconds = (event.timestamp - lastTimestamp) / 1_000_000_000f
-            if (seconds > 0f) {
-                dt = seconds.coerceIn(0.005f, 0.1f)
-                speed = Math.toDegrees(relativeAngle(previous, rotation).toDouble()).toFloat() / dt
-                haveRate = true
-            }
+        val dt = if (lastTimestamp > 0L) {
+            ((event.timestamp - lastTimestamp) / 1_000_000_000f).coerceIn(0.005f, 0.1f)
+        } else {
+            0.02f
         }
         lastTimestamp = event.timestamp
-        for (i in 0 until 9) previous[i] = rotation[i]
-        hasPrevious = true
 
-        val now = SystemClock.elapsedRealtime()
-        // Smooth "how still is it" score instead of a per-sample boolean: a
-        // single noisy sample used to flip still<->moving at 50 Hz, which made
-        // the effect pump between reset and warped.
-        if (haveRate) {
-            val target = if (speed <= STILL_SPEED_DEG_S) 1f else 0f
-            val a = 1f - exp(-dt / STILL_TAU_S).toFloat()
-            stillScore += (target - stillScore) * a
-        }
-        val still = stillScore >= STILL_ENTER
-        if (still) {
-            if (stillSince == 0L) stillSince = now
-        } else {
-            stillSince = 0L
-        }
-        val settled = still && stillSince != 0L && now - stillSince >= STILL_MS
-        // A phone lying on a table is not being held; do not adopt that as centre.
-        val upright = abs(rotation[5]) < UPRIGHT_LIMIT
+        // A heading only means something while the screen faces sideways. R[8] is
+        // the cosine of the angle between the screen normal and straight up, so it
+        // is ~0 held in the hand and ~1 flat on a table, where the heading would
+        // be ill-conditioned and report a phantom turn.
+        val sideways = abs(rotation[8]) <= FACING_COS_LIMIT
 
-        if (!armed) {
-            if (settled && upright) {
-                calibrate()
-                depth = 0f
-                idle = true
-                DepthEngine.publishCentered(true)
-                android.util.Log.d("TunerDepth", "centre locked to a steady hold")
-            } else {
-                DepthEngine.publishCentered(false)
-                onChange(0f, 0f)
-                return
-            }
+        if (calibrating) {
+            calibrationStep(sideways)
+            onChange(0f, 0f)
+            return
+        }
+        if (!armed || !sideways) {
+            depth = 0f
+            DepthEngine.publishCentered(armed && sideways)
+            onChange(0f, 0f)
+            return
         }
 
-        // Yaw only: turning the phone left or right. Rolling it like a steering
-        // wheel must not move the effect.
         val raw = yawFromNeutral()
-
         if (!primed) {
             filtered = raw
             lastRaw = raw
@@ -194,86 +173,82 @@ class TiltTracker(
             oneEuro(raw, dt)
         }
 
-        val tilt = filtered
-
-        // With the screen facing the ceiling the normal is parallel to gravity,
-        // so atan2(x, z) is ill-conditioned and reports a phantom yaw. Nothing is
-        // published unless the device is roughly vertical.
-        if (!upright) {
-            depth = 0f
-            DepthEngine.publishCentered(false)
-            onChange(0f, 0f)
-            return
-        }
-
-        // One centre per home visit. Auto-recentring on "still" was the cause of
-        // the effect pumping: a slow yaw reads as still, gets adopted as the new
-        // zero, the bend drops, then grows again. Now the centre is captured once,
-        // when the phone is genuinely held still and upright, and only moves when
-        // the user asks for it.
-        // The centre is taken on the next sample after a request — arriving on
-        // the home screen, or a touch — rather than after a stillness timer, so
-        // there is no dead window where yaw does nothing.
-        if (calibrating) {
-            val yawNow = yawFromNeutral()
-            val t = SystemClock.elapsedRealtime()
-            if (calibStart == 0L) {
-                calibStart = t
-                calibMin = yawNow
-                calibMax = yawNow
-                calibCount = 0
-                onStatus?.invoke("start")
-            }
-            calibMin = minOf(calibMin, yawNow)
-            calibMax = maxOf(calibMax, yawNow)
-            calibCount++
-
-            if (t - calibStart >= CALIBRATION_MS) {
-                val steady = calibMax - calibMin <= CALIB_TOLERANCE_DEG && calibCount >= 8
-                if (steady) {
-                    android.util.Log.d(
-                        "TunerDepth",
-                        "centre committed, spread=" + String.format("%.1f", calibMax - calibMin) +
-                            " over " + (t - calibStart) + "ms",
-                    )
-                    calibrate()
-                    calibrating = false
-                    armed = true
-                    depth = 0f
-                    DepthEngine.publishCentered(true)
-                    onStatus?.invoke("ready")
-                } else {
-                    // Still moving: restart the window instead of guessing.
-                    android.util.Log.d("TunerDepth", "calibration window unstable, retrying")
-                    calibStart = 0L
-                }
-            }
-            onChange(0f, 0f)
-            return
-        }
-        if (pendingCentre) {
-            calibrate()
-            depth = 0f
-            pendingCentre = false
-            armed = true
-            DepthEngine.publishCentered(true)
-            onChange(0f, 0f)
-            return
-        }
-        if (!armed) {
-            onChange(0f, 0f)
-            return
-        }
-
-        val target = smoothstep(DEAD_ZONE_DEG, DepthEngine.maxAngle, abs(tilt))
-        // Ease the effect itself: the angle may move quickly, but the warp
-        // should arrive and leave slowly.
-        val a = 1f - exp(-dt / DEPTH_TAU_S).toFloat()
-        depth += (target - depth) * a
-        onChange(tilt, depth)
+        val target = smoothstep(DEAD_ZONE_DEG, DepthEngine.maxAngle, abs(filtered))
+        // Ease the effect itself: the angle may move quickly, but the warp should
+        // arrive and leave slowly.
+        depth += (target - depth) * (1f - exp(-dt / DEPTH_TAU_S).toFloat())
+        onChange(filtered, depth)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private fun calibrationStep(sideways: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (windowOpenedAt == 0L) {
+            for (i in 0 until 9) windowStart[i] = rotation[i]
+            windowOpenedAt = now
+            windowSamples = 0
+            windowWorst = 0f
+            onStatus?.invoke("start")
+            return
+        }
+        windowSamples++
+        // How far the pose has strayed from the attitude this window opened with.
+        // The angle between two attitudes is the same number whichever way the
+        // platform orders its axes, so the check cannot be fooled by that.
+        val strayed = Math.toDegrees(angleBetween(windowStart, rotation).toDouble()).toFloat()
+        windowWorst = max(windowWorst, strayed)
+        if (now - windowOpenedAt < CALIBRATION_MS) return
+
+        val seconds = (now - windowOpenedAt) / 1000f
+        when {
+            !sideways -> retry("screen not facing sideways")
+            windowSamples < MIN_WINDOW_SAMPLES -> retry("not enough samples")
+            windowWorst > CALIB_TOLERANCE_DEG ->
+                retry("moved ${String.format("%.1f", windowWorst)}° in ${String.format("%.2f", seconds)}s")
+            else -> commitCentre()
+        }
+    }
+
+    private fun retry(why: String) {
+        android.util.Log.d("TunerDepth", "calibration restarts: $why")
+        closeWindow()
+    }
+
+    private fun closeWindow() {
+        windowOpenedAt = 0L
+        windowSamples = 0
+        windowWorst = 0f
+    }
+
+    private fun commitCentre() {
+        if (!hasSample) return
+        neutralAzimuth = angles[0]
+        depth = 0f
+        filtered = 0f
+        lastRaw = 0f
+        derivative = 0f
+        primed = false
+        val worst = windowWorst
+        closeWindow()
+        calibrating = false
+        armed = true
+        DepthEngine.publishCentered(true)
+        android.util.Log.d(
+            "TunerDepth",
+            "centre committed, held within " + String.format("%.1f", worst) + "°, yaw now " +
+                String.format("%.1f", yawFromNeutral()),
+        )
+        onStatus?.invoke("ready")
+    }
+
+    /** Signed turn away from the captured pose, zero while the phone is not moved. */
+    private fun yawFromNeutral(): Float {
+        var d = Math.toDegrees((angles[0] - neutralAzimuth).toDouble()).toFloat()
+        while (d > 180f) d -= 360f
+        while (d < -180f) d += 360f
+        return d
+    }
 
     /**
      * One-euro filter: cutoff rises with the filtered derivative, so slow motion
@@ -287,79 +262,40 @@ class TiltTracker(
         filtered = lowpass(x, filtered, alpha(cutoff, dt))
     }
 
+    private fun lowpass(x: Float, prev: Float, a: Float) = prev + a * (x - prev)
+
     private fun alpha(cutoff: Float, dt: Float): Float {
         val tau = 1f / (2f * PI.toFloat() * cutoff)
         return 1f / (1f + tau / dt)
     }
 
-    private fun lowpass(x: Float, prev: Float, a: Float) = prev + a * (x - prev)
-
-    /**
-     * Roll: the in-plane direction of gravity, degrees. Gravity in device
-     * coordinates is (-r[3], -r[4], -r[5]); the angle is atan2(gx, -gy), which
-     * stays zero when the phone is pitched but not rolled — the previous
-     * atan2(gx, gy) folded pitch into this axis, which is why tilting the phone
-     * top/bottom reacted more than tilting it left/right.
-     */
-    private fun rawRoll(): Float =
-        Math.toDegrees(atan2(-rotation[3], rotation[4]).toDouble()).toFloat()
-
-    private fun rollFromNeutral(): Float {
-        var r = rawRoll() - gravityNeutral
-        while (r > 180f) r -= 360f
-        while (r < -180f) r += 360f
-        return r
-    }
-
-    /** Screen normal's x component relative to neutral, in degrees. */
-    private fun yawFromNeutral(): Float {
-        val n0 = neutral
-        val r = rotation
-        val cx = r[2]
-        val cy = r[5]
-        val cz = r[8]
-        val vx = n0[0] * cx + n0[1] * cy + n0[2] * cz
-        val vz = n0[6] * cx + n0[7] * cy + n0[8] * cz
-        if (vz <= 0f) return 0f
-        return Math.toDegrees(atan2(vx, vz).toDouble()).toFloat()
-    }
-
-    private fun relativeAngle(a: FloatArray, b: FloatArray): Float {
+    /** Angle in radians between two attitudes. */
+    private fun angleBetween(a: FloatArray, b: FloatArray): Float {
         var trace = 0f
         for (i in 0 until 3) {
             for (j in 0 until 3) {
                 trace += a[j * 3 + i] * b[j * 3 + i]
             }
         }
-        val c = ((trace - 1f) / 2f).coerceIn(-1f, 1f)
-        return acos(c)
+        return acos(((trace - 1f) / 2f).coerceIn(-1f, 1f))
     }
 
     private companion object {
-        /** |screen normal · world up|; above this the phone is lying flat. */
-        const val UPRIGHT_LIMIT = 0.7f
+        /** cos(45°): the screen may point at most this far above or below the horizon. */
+        const val FACING_COS_LIMIT = 0.7071f
 
-        const val STILL_SPEED_DEG_S = 8f
-        const val STILL_MS = 1000L
-        const val DEAD_ZONE_DEG = 10f
-        const val RECENTRE_BAND_DEG = 3f
         const val CALIBRATION_MS = 900L
         const val CALIB_TOLERANCE_DEG = 3f
+        const val MIN_WINDOW_SAMPLES = 8
+
+        const val DEAD_ZONE_DEG = 10f
 
         // One-euro tuning.
         const val MIN_CUTOFF = 0.7f
         const val BETA = 0.02f
         const val DERIVATIVE_CUTOFF = 1.0f
 
-        // Drift washout.
         const val DEPTH_TAU_S = 0.30f
-        /** Leaving this much tilt from the latched centre re-engages the effect. */
-        const val REENGAGE_DEG = 5f
-
-        /** Stillness score time constant and thresholds. */
-        const val STILL_TAU_S = 0.35f
-        const val STILL_ENTER = 0.75f
-        const val STILL_EXIT = 0.35f
 
         fun smoothstep(edge0: Float, edge1: Float, x: Float): Float {
             if (edge1 <= edge0) return if (x >= edge1) 1f else 0f

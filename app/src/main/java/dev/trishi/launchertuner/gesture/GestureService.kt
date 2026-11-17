@@ -61,8 +61,12 @@ class GestureService : AccessibilityService() {
         instance = this
         tilt = TiltTracker(this) { angle, depth -> DepthEngine.publishTilt(angle, depth) }
         tilt.onStatus = { state ->
-            if (state == "start") showChip("Recalibrating…", sticky = true)
-            else { hideChip(); showChip("Fold ready", sticky = false) }
+            // The status belongs to the launcher, not to the app: it would be
+            // noise to announce a centre the user cannot see or use yet.
+            if (chipAllowed()) {
+                if (state == "start") showChip("Recalibrating…", sticky = true)
+                else { hideChip(); showChip("Fold ready", sticky = false) }
+            }
         }
         DepthEngine.addListener(depthListener)
         registerScreenReceiver()
@@ -80,6 +84,7 @@ class GestureService : AccessibilityService() {
         val interaction = type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
             type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
         if (interaction) {
+            if (!onHome || awaitHome) return
             // Content changes also fire from idle animations, so re-learning is
             // rate limited rather than automatic on every event.
             val now = SystemClock.elapsedRealtime()
@@ -154,6 +159,7 @@ class GestureService : AccessibilityService() {
         DepthEngine.enabled = true
         DepthEngine.reset()
         DepthEngine.clearFrame()
+        tilt.pause()
         // Calibration is deferred until the launcher is confirmed in front, so
         // flipping the switch inside this app never measures the wrong pose.
         awaitHome = true
@@ -253,14 +259,20 @@ class GestureService : AccessibilityService() {
         if (home == onHome) return
         onHome = home
         homeSince = if (home) SystemClock.elapsedRealtime() else 0L
-        if (home && (awaitHome || !tilt.isArmed())) {
-            // Arriving on the home screen is the only moment a centre is learned
-            // after enabling: pause, watch, then commit.
-            awaitHome = false
-            overlay?.visibility = View.INVISIBLE
-            tilt.beginRecalibration()
-        }
-        if (!home) {
+        if (home) {
+            if (awaitHome || !tilt.isArmed()) {
+                // Arriving on the home screen is the only moment a centre is
+                // learned after enabling: pause, watch multiple passes, commit.
+                awaitHome = false
+                overlay?.visibility = View.INVISIBLE
+                tilt.beginRecalibration()
+            }
+        } else {
+            // Not on the launcher any more: abandon any window still open, so a
+            // centre can never be committed from a pose found inside another app.
+            awaitHome = true
+            hideChip()
+            tilt.pause()
             DepthEngine.clearFrame()
             DepthEngine.reset()
         }
@@ -316,6 +328,10 @@ class GestureService : AccessibilityService() {
         y = (140 * resources.displayMetrics.density).toInt()
     }
 
+    /** The launcher is in front and the fold has been asked for. */
+    private fun chipAllowed(): Boolean =
+        DepthEngine.enabled && onHome && !awaitHome
+
     private fun isLocked(): Boolean = runCatching {
         getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
     }.getOrDefault(false)
@@ -351,10 +367,6 @@ class GestureService : AccessibilityService() {
         fun isRunning() = instance != null
 
         fun refresh() = instance?.apply()
-
-        fun recentre() {
-            instance?.tilt?.calibrate()
-        }
 
         fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }

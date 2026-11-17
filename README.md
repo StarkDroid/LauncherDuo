@@ -57,14 +57,25 @@ leaves the foreground. There is no internet permission.
    used only as a fast path and deliberately ignore our own package, because the
    overlay window would otherwise toggle the gate and the effect would stutter at
    1 Hz.
-3. When the launcher is confirmed in front, calibration starts: a 900 ms window
-   that must see at least 8 samples with the yaw staying inside a 3° spread. If the
-   phone is still moving, the window restarts instead of guessing. A toast reports
-   "Recalibrating the fold…" and then "Fold ready".
-4. Yaw is only interpreted while the screen is roughly vertical; facing the ceiling
-   makes `atan2(x, z)` ill-conditioned and would report a phantom turn.
-5. A tap or a launcher content change hides the fold instantly and re-runs steps
-   3-4, rate limited to one recalibration per 1.5 s.
+3. When the launcher is confirmed in front, calibration starts: a 900 ms window of
+   at least 8 samples in which the phone must not have moved more than 3° from the
+   attitude the window opened with. Unsteady windows are thrown away and started
+   again rather than guessed at. A chip on the home screen reports
+   "Recalibrating…" and then "Fold ready".
+4. The centre is the heading the screen faces at the moment the window commits.
+   `TYPE_GAME_ROTATION_VECTOR` becomes a rotation matrix, that matrix is remapped so
+   the viewing direction is the frame's vertical reference, and
+   `SensorManager.getOrientation` reports its compass heading. The fold is driven by
+   the change since the committed heading, so it reads exactly 0° while the phone
+   stays where it was calibrated, and the same amount with opposite signs for equal
+   turns either way. Rolling the phone in the hand or pitching it top-to-bottom does
+   not enter the signal at all.
+5. The heading is only read while the screen faces sideways, within 45° of the
+   horizon: a phone lying flat or facing the ceiling has no meaningful left turn.
+6. A tap, a launcher content change, or pulling down the shade hides the fold
+   instantly and re-runs step 3, rate limited to one recalibration per 1.5 s.
+   Leaving the launcher abandons any calibration in progress, so a centre is never
+   committed from a pose found inside another app.
 
 ## Turning it on
 
