@@ -150,8 +150,9 @@ class TiltTracker(
             }
         }
 
-        // Both axes, summed: no per-sample axis switching, so no flapping.
-        val raw = yawFromNeutral() + rollFromNeutral()
+        // Yaw only: turning the phone left or right. Rolling it like a steering
+        // wheel must not move the effect.
+        val raw = yawFromNeutral()
 
         if (!primed) {
             filtered = raw

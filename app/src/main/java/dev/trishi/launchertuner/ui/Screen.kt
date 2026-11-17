@@ -44,13 +44,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlin.math.sin
+import kotlin.math.cos
 
 @Composable
 fun DuoScreen(vm: DuoViewModel = viewModel()) {
@@ -75,7 +75,7 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "Tilt the phone and the home screen bends into the edge you tilt toward.",
+                "Turn the phone and the home screen bends into the edge you turn toward.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -206,9 +206,10 @@ private fun TiltPreview() {
     ) {
         Canvas(Modifier.fillMaxWidth().height(210.dp).clipToBounds()) {
             val pivot = Offset(size.width / 2f, size.height * 0.90f)
-            val angle = sin(phase * Math.PI.toFloat()) * 8f
+            // Yaw is foreshortening, not rotation: the device narrows as it turns.
+            val scaleX = 0.90f + 0.10f * cos(phase * Math.PI.toFloat())
 
-            rotate(angle, pivot = pivot) {
+            scale(scaleX, 1f, pivot = pivot) {
                 val phoneW = size.width * 0.28f
                 val phoneH = size.height * 0.62f
                 val cx = size.width / 2f
@@ -276,7 +277,7 @@ private fun TiltPreview() {
             }
         }
         Text(
-            "Hold the phone as usual and tilt it left or right",
+            "Turn the phone left or right, as if showing the screen to someone",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp),
