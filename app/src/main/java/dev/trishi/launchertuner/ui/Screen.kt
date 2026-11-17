@@ -149,7 +149,7 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
                 )
 
                 Text(
-                    "Home screen only. The pose is re-based when you arrive here and when you touch the screen.",
+                    "Home screen only. The pose is re-learned when you arrive here, when you touch the screen, when you pull down the shade, and when you open recents — the fold pauses during each of those and resumes once the reading settles.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

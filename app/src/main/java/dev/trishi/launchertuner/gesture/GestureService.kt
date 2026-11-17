@@ -34,13 +34,17 @@ class GestureService : AccessibilityService() {
     private var onHome = false
     private var awaitHome = false
     private var lastRecalibrationAt = 0L
+    private var chip: android.widget.TextView? = null
+    private var suppressUntil = 0L
 
     private val depthListener: () -> Unit = listener@{
         val view = overlay ?: return@listener
         // The tracker keeps publishing while you are in any app, so the gate has
         // to be checked here as well: nothing is drawn unless the launcher owns
         // the foreground.
-        val visible = onHome && !awaitHome && DepthEngine.depth > 0.002f && !isLocked()
+        val visible = onHome && !awaitHome &&
+            SystemClock.elapsedRealtime() > suppressUntil &&
+            DepthEngine.depth > 0.002f && !isLocked()
         val wanted = if (visible) View.VISIBLE else View.INVISIBLE
         if (view.visibility != wanted) view.visibility = wanted
         if (visible) {
@@ -57,8 +61,8 @@ class GestureService : AccessibilityService() {
         instance = this
         tilt = TiltTracker(this) { angle, depth -> DepthEngine.publishTilt(angle, depth) }
         tilt.onStatus = { state ->
-            val text = if (state == "start") "Recalibrating the fold…" else "Fold ready"
-            android.widget.Toast.makeText(applicationContext, text, android.widget.Toast.LENGTH_SHORT).show()
+            if (state == "start") showChip("Recalibrating…", sticky = true)
+            else { hideChip(); showChip("Fold ready", sticky = false) }
         }
         DepthEngine.addListener(depthListener)
         registerScreenReceiver()
@@ -89,7 +93,22 @@ class GestureService : AccessibilityService() {
         }
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = pkgFromEvent ?: return
-        if (pkg == "com.android.systemui" || pkg == "android") return
+        if (pkg == "com.android.systemui") {
+            // The shade, the lock screen and the notification panel are drawn by
+            // SystemUI over the launcher. They do not change who owns the screen,
+            // but the fold must not float above them, so pause and re-learn.
+            val cls = event.className?.toString().orEmpty()
+            if (cls.contains("Shade", ignoreCase = true) ||
+                cls.contains("Panel", ignoreCase = true) ||
+                cls.contains("Keyguard", ignoreCase = true)
+            ) {
+                suppressUntil = SystemClock.elapsedRealtime() + SUPPRESS_MS
+                overlay?.visibility = View.INVISIBLE
+                tilt.beginRecalibration()
+            }
+            return
+        }
+        if (pkg == "android") return
         applyHome(pkg == LAUNCHER)
     }
 
@@ -116,6 +135,7 @@ class GestureService : AccessibilityService() {
         runCatching { screenReceiver?.let { unregisterReceiver(it) } }
         DepthEngine.removeListener(depthListener)
         removeOverlay()
+        hideChip()
         tilt.stop()
         instance = null
         super.onDestroy()
@@ -246,6 +266,56 @@ class GestureService : AccessibilityService() {
         }
     }
 
+    /**
+     * A small pill near the bottom, drawn by us. Toasts from a background app are
+     * dropped by the system since Android 12, and this app is always in the
+     * background while the fold matters.
+     */
+    private fun showChip(text: String, sticky: Boolean) {
+        val wm = getSystemService(WindowManager::class.java)
+        val view = chip ?: android.widget.TextView(this).apply {
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 13f
+            setPadding(36, 18, 36, 18)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.argb(215, 20, 20, 24))
+                cornerRadius = 40f
+            }
+            gravity = android.view.Gravity.CENTER
+            chip = this
+        }
+        view.text = text
+        val lp = chipParams()
+        if (view.parent == null) {
+            runCatching { wm.addView(view, lp) }
+        } else {
+            runCatching { wm.updateViewLayout(view, lp) }
+        }
+        view.bringToFront()
+        if (!sticky) {
+            mainHandler.postDelayed({ hideChip() }, 900L)
+        }
+    }
+
+    private fun hideChip() {
+        chip?.let { c ->
+            if (c.parent != null) runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(c) }
+        }
+        chip = null
+    }
+
+    private fun chipParams() = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+        PixelFormat.TRANSLUCENT,
+    ).apply {
+        gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        y = (140 * resources.displayMetrics.density).toInt()
+    }
+
     private fun isLocked(): Boolean = runCatching {
         getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
     }.getOrDefault(false)
@@ -271,6 +341,7 @@ class GestureService : AccessibilityService() {
         private const val LAUNCHER = "com.google.android.apps.nexuslauncher"
         private const val SETTLE_MS = 250L
         private const val RECALIBRATE_COOLDOWN_MS = 1500L
+        private const val SUPPRESS_MS = 1600L
         private const val CAPTURE_MS = 250L
         private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
