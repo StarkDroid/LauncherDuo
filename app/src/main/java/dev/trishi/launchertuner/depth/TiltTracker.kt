@@ -56,6 +56,7 @@ class TiltTracker(
 
     private var hasSample = false
     private var armed = false
+    private var listening = false
     private var calibrating = false
     private var neutralAzimuth = 0f
     private val neutralRotation = FloatArray(9)
@@ -71,6 +72,7 @@ class TiltTracker(
     private var windowBase = 0f
     private var windowCarried = 0f
     private var windowLast = 0f
+    private var statusOpen = false
 
     /** Reports "start" when a recalibration begins and "ready" when it commits. */
     var onStatus: ((String) -> Unit)? = null
@@ -90,13 +92,17 @@ class TiltTracker(
             android.util.Log.w("TunerDepth", "no rotation sensor")
             return false
         }
-        val ok = sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME)
-        android.util.Log.d("TunerDepth", "rotation sensor ${s.name} registered=$ok")
-        return ok
+        if (listening) return true
+        listening = sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME)
+        android.util.Log.d("TunerDepth", "rotation sensor ${s.name} registered=$listening")
+        return listening
     }
 
     fun stop() {
-        runCatching { sensors.unregisterListener(this) }
+        if (listening) {
+            runCatching { sensors.unregisterListener(this) }
+            listening = false
+        }
         pause()
     }
 
@@ -110,6 +116,7 @@ class TiltTracker(
     fun pause() {
         armed = false
         calibrating = false
+        statusOpen = false
         closeWindow()
         depth = 0f
         primed = false
@@ -124,6 +131,7 @@ class TiltTracker(
      */
     fun beginRecalibration() {
         calibrating = true
+        statusOpen = false
         armed = false
         closeWindow()
         depth = 0f
@@ -219,7 +227,10 @@ class TiltTracker(
             windowBase = angles[0]
             windowCarried = 0f
             windowLast = angles[0]
-            onStatus?.invoke("start")
+            if (!statusOpen) {
+                statusOpen = true
+                onStatus?.invoke("start")
+            }
             return
         }
         // Walk the heading forward a sample at a time: a raw difference of azimuths
@@ -279,6 +290,7 @@ class TiltTracker(
         closeWindow()
         calibrating = false
         armed = true
+        statusOpen = false
         DepthEngine.publishCentered(true)
         android.util.Log.d(
             "TunerDepth",
@@ -330,8 +342,8 @@ class TiltTracker(
     }
 
     private companion object {
-        /** cos(45°): the screen may point at most this far above or below the horizon. */
-        const val FACING_COS_LIMIT = 0.7071f
+        /** sin(60°): the screen may point at most this far above or below the horizon. */
+        const val FACING_COS_LIMIT = 0.8660f
 
         const val CALIBRATION_MS = 700L
         const val MAX_WINDOW_SAMPLES = 64
