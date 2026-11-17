@@ -86,6 +86,37 @@ leaves the foreground. There is no internet permission.
    the launcher abandons any calibration in progress, so a centre is never committed
    from a pose found inside another app.
 
+## Invariants — do not break these
+
+The calibration arithmetic is unit tested, because every bug this effect has had
+came from a wrong number rather than a wrong idea:
+
+```
+./gradlew test          # or: ./gradlew :app:testDebugUnitTest
+```
+
+`app/build/reports/tests/` explains any failure. The rules the tests pin down:
+
+- **Units.** `SensorManager.getOrientation` reports **radians**; everything else in
+  the app is **degrees**. The conversion happens in `PoseCalibration.commit` and
+  `PoseCalibration.yawFrom` and nowhere else. Adding degrees to radians makes the
+  fold snap to one side the moment it says "ready", which is the exact bug these
+  tests were written for.
+- **The centre is a median**, never an instantaneous reading, and it needs 75% of
+  the window within 4° of itself. A hand holding a phone still sways by a couple of
+  degrees, so a strict no-motion rule never settles and an instantaneous sample
+  inherits whatever the tremor was doing.
+- **Zero at the committed pose, symmetric either side**, for every compass heading
+  and across the ±180° seam.
+- **Nothing bends until the phone has physically left the committed attitude by 4°.**
+  This is the last line of defence: it is measured as the angle between two
+  attitudes, which does not depend on any axis convention, so a heading that is
+  somehow wrong can block the fold but cannot invent one.
+- **The fold only ever draws on the launcher**, only after a confirmed arrival there,
+  and only once a centre was committed while the launcher was in front.
+
+If you change any of the above, change the tests in the same commit and say why.
+
 ## Turning it on
 
 The effect never resumes by itself after a reboot or an accessibility rebind — the
@@ -96,7 +127,9 @@ pose you are actually using rather than one captured days ago.
 ## Build
 
 ```bash
+./gradlew test                    # the calibration arithmetic, on the JVM, no device
 ./gradlew :app:assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleRelease
 ```
 
 Requires JDK 17 and the Android SDK (compileSdk 37). No root, no Shizuku, no ADB
