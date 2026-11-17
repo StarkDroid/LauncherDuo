@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -175,7 +176,7 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
     }
 }
 
-/** Looping illustration of the gesture: the card leans and its far edge bends. */
+/** The gesture, illustrated: a hand holding the phone and rocking it sideways. */
 @Composable
 private fun TiltPreview() {
     val transition = rememberInfiniteTransition(label = "tilt")
@@ -183,65 +184,99 @@ private fun TiltPreview() {
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2600, easing = LinearEasing),
+            animation = tween(2800, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "phase",
     )
 
+    val skin = Color(0xFFD3A183)
+    val skinShade = Color(0xFFB98466)
+    val body = Color(0xFF15151A)
+    val glass = Color(0xFF22222B)
     val accent = MaterialTheme.colorScheme.primary
-    val surface = MaterialTheme.colorScheme.surfaceVariant
 
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(surface.copy(alpha = 0.35f))
-            .padding(vertical = 18.dp),
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f))
+            .padding(vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-            val centre = Offset(size.width / 2f, size.height / 2f)
-            val tilt = sin(phase * Math.PI.toFloat()) * 10f
-            val phoneW = size.width * 0.30f
-            val phoneH = size.height * 0.82f
+        Canvas(Modifier.fillMaxWidth().height(210.dp).clipToBounds()) {
+            val pivot = Offset(size.width / 2f, size.height * 0.90f)
+            val angle = sin(phase * Math.PI.toFloat()) * 8f
 
-            rotate(tilt, pivot = centre) {
+            rotate(angle, pivot = pivot) {
+                val phoneW = size.width * 0.28f
+                val phoneH = size.height * 0.62f
+                val cx = size.width / 2f
+                val top = size.height * 0.10f
+
+                // Forearm and palm sit behind the device.
                 drawRoundRect(
-                    color = Color(0xFF17171C),
-                    topLeft = Offset(centre.x - phoneW / 2, centre.y - phoneH / 2),
-                    size = Size(phoneW, phoneH),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f),
+                    color = skinShade,
+                    topLeft = Offset(cx - phoneW * 0.42f, pivot.y - 10f),
+                    size = Size(phoneW * 0.84f, size.height * 0.35f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(26f, 26f),
                 )
                 drawRoundRect(
-                    color = accent.copy(alpha = 0.85f),
-                    topLeft = Offset(centre.x + phoneW * 0.28f, centre.y - phoneH / 2 + 8f),
-                    size = Size(phoneW * 0.22f, phoneH - 16f),
+                    color = skin,
+                    topLeft = Offset(cx - phoneW * 0.60f, top + phoneH * 0.55f),
+                    size = Size(phoneW * 1.20f, phoneH * 0.50f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(30f, 30f),
+                )
+
+                // Device.
+                drawRoundRect(
+                    color = body,
+                    topLeft = Offset(cx - phoneW / 2f, top),
+                    size = Size(phoneW, phoneH),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f, 20f),
+                )
+                drawRoundRect(
+                    color = glass,
+                    topLeft = Offset(cx - phoneW / 2f + 6f, top + 6f),
+                    size = Size(phoneW - 12f, phoneH - 12f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f),
+                )
+                // Screen content hint.
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.35f),
+                    topLeft = Offset(cx - phoneW / 2f + 14f, top + phoneH * 0.16f),
+                    size = Size(phoneW - 28f, phoneH * 0.10f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f),
+                )
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.18f),
+                    topLeft = Offset(cx - phoneW / 2f + 14f, top + phoneH * 0.34f),
+                    size = Size(phoneW - 28f, phoneH * 0.34f),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f, 12f),
                 )
+
+                // Fingers wrapping the near edge.
+                val fingerW = phoneW * 0.20f
+                for (i in 0 until 4) {
+                    val y = top + phoneH * (0.30f + i * 0.14f)
+                    drawRoundRect(
+                        color = skin,
+                        topLeft = Offset(cx - phoneW / 2f - fingerW * 0.55f, y),
+                        size = Size(fingerW, phoneH * 0.10f),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(14f, 14f),
+                    )
+                }
+                // Thumb on the far edge.
                 drawRoundRect(
-                    color = accent.copy(alpha = 0.25f),
-                    topLeft = Offset(centre.x - phoneW / 2, centre.y - phoneH / 2),
-                    size = Size(phoneW, phoneH),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(18f, 18f),
-                    style = Stroke(width = 3f),
+                    color = skin,
+                    topLeft = Offset(cx + phoneW / 2f - fingerW * 0.35f, top + phoneH * 0.52f),
+                    size = Size(fingerW * 0.95f, phoneH * 0.26f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f),
                 )
             }
-
-            drawCircle(
-                color = accent.copy(alpha = 0.18f),
-                radius = 26f,
-                center = Offset(centre.x - size.width * 0.30f, centre.y - size.height * 0.30f),
-            )
-            drawLine(
-                color = accent.copy(alpha = 0.55f),
-                start = Offset(centre.x - size.width * 0.30f, centre.y - size.height * 0.30f),
-                end = Offset(centre.x - size.width * 0.18f, centre.y - size.height * 0.30f),
-                strokeWidth = 4f,
-            )
         }
         Text(
-            "Tilt left or right — the edge you tilt toward folds inward",
+            "Hold the phone as usual and tilt it left or right",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp),
