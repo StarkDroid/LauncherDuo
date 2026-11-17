@@ -35,6 +35,7 @@ class GestureService : AccessibilityService() {
     private var awaitHome = false
     private var lastRecalibrationAt = 0L
     private var chip: android.widget.TextView? = null
+    private var pendingChip: Runnable? = null
     private var suppressUntil = 0L
 
     private val depthListener: () -> Unit = listener@{
@@ -64,8 +65,7 @@ class GestureService : AccessibilityService() {
             // The status belongs to the launcher, not to the app: it would be
             // noise to announce a centre the user cannot see or use yet.
             if (chipAllowed()) {
-                if (state == "start") showChip("Recalibrating…", sticky = true)
-                else { hideChip(); showChip("Fold ready", sticky = false) }
+                if (state == "start") delayChip("Recalibrating…") else readyChip()
             }
         }
         DepthEngine.addListener(depthListener)
@@ -81,12 +81,17 @@ class GestureService : AccessibilityService() {
         val type = event?.eventType ?: return
         val pkgFromEvent = event.packageName?.toString()
         if (pkgFromEvent == packageName) return
-        val interaction = type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
-            type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-        if (interaction) {
+        val clicking = type == AccessibilityEvent.TYPE_VIEW_CLICKED
+        // The launcher repaints on its own: the clock, the At a Glance feed, icon
+        // badges. While nothing is folded those changes are invisible, so they must
+        // not be allowed to interrupt the effect — only a real touch, or content
+        // changing under a fold that is actually on screen, means the user is
+        // interacting.
+        val engagedUnderway = type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            DepthEngine.depth > IDLE_DEPTH
+        if (clicking || engagedUnderway) {
             if (!onHome || awaitHome) return
-            // Content changes also fire from idle animations, so re-learning is
-            // rate limited rather than automatic on every event.
+            // Rate limited on top of that, because a swipe emits a burst.
             val now = SystemClock.elapsedRealtime()
             if (now - lastRecalibrationAt < RECALIBRATE_COOLDOWN_MS) return
             lastRecalibrationAt = now
@@ -96,7 +101,7 @@ class GestureService : AccessibilityService() {
             tilt.beginRecalibration()
             return
         }
-        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = pkgFromEvent ?: return
         if (pkg == "com.android.systemui") {
             // The shade, the lock screen and the notification panel are drawn by
@@ -283,7 +288,28 @@ class GestureService : AccessibilityService() {
      * dropped by the system since Android 12, and this app is always in the
      * background while the fold matters.
      */
-    private fun showChip(text: String, sticky: Boolean) {
+    /**
+     * A clean read takes under a second, which is too fast to be worth
+     * explaining. The warning only appears if the wait actually happened.
+     */
+    private fun delayChip(text: String) {
+        pendingChip?.let { mainHandler.removeCallbacks(it) }
+        val r = Runnable {
+            pendingChip = null
+            showChip(text)
+        }
+        pendingChip = r
+        mainHandler.postDelayed(r, CHIP_DELAY_MS)
+    }
+
+    private fun readyChip() {
+        pendingChip?.let { mainHandler.removeCallbacks(it) }
+        pendingChip = null
+        showChip("Fold ready")
+        mainHandler.postDelayed({ hideChip() }, CHIP_READY_MS)
+    }
+
+    private fun showChip(text: String) {
         val wm = getSystemService(WindowManager::class.java)
         val view = chip ?: android.widget.TextView(this).apply {
             setTextColor(android.graphics.Color.WHITE)
@@ -304,12 +330,11 @@ class GestureService : AccessibilityService() {
             runCatching { wm.updateViewLayout(view, lp) }
         }
         view.bringToFront()
-        if (!sticky) {
-            mainHandler.postDelayed({ hideChip() }, 900L)
-        }
     }
 
     private fun hideChip() {
+        pendingChip?.let { mainHandler.removeCallbacks(it) }
+        pendingChip = null
         chip?.let { c ->
             if (c.parent != null) runCatching { getSystemService(WindowManager::class.java).removeViewImmediate(c) }
         }
@@ -356,7 +381,11 @@ class GestureService : AccessibilityService() {
         const val KEY_STRENGTH = "strength"
         private const val LAUNCHER = "com.google.android.apps.nexuslauncher"
         private const val SETTLE_MS = 250L
-        private const val RECALIBRATE_COOLDOWN_MS = 1500L
+        private const val RECALIBRATE_COOLDOWN_MS = 1200L
+        private const val CHIP_DELAY_MS = 400L
+        private const val CHIP_READY_MS = 900L
+        /** Below this the fold is not on screen, so an event cannot disturb it. */
+        private const val IDLE_DEPTH = 0.01f
         private const val SUPPRESS_MS = 1600L
         private const val CAPTURE_MS = 250L
         private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())

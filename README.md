@@ -57,11 +57,13 @@ leaves the foreground. There is no internet permission.
    used only as a fast path and deliberately ignore our own package, because the
    overlay window would otherwise toggle the gate and the effect would stutter at
    1 Hz.
-3. When the launcher is confirmed in front, calibration starts: a 900 ms window of
-   at least 8 samples in which the phone must not have moved more than 3° from the
-   attitude the window opened with. Unsteady windows are thrown away and started
-   again rather than guessed at. A chip on the home screen reports
-   "Recalibrating…" and then "Fold ready".
+3. When the launcher is confirmed in front, calibration starts: a 700 ms window of
+   heading samples from which the **median** becomes the centre, accepted once three
+   quarters of the samples agree with it to within 4°. A hand holding a phone
+   "still" sways by a couple of degrees continuously, so an instantaneous reading
+   or a strict no-motion rule never settles; a median does, and it still refuses to
+   commit during a deliberate turn. A chip reports "Recalibrating…" — only if the
+   wait actually exceeded 400 ms — and then "Fold ready".
 4. The centre is the heading the screen faces at the moment the window commits.
    `TYPE_GAME_ROTATION_VECTOR` becomes a rotation matrix, that matrix is remapped so
    the viewing direction is the frame's vertical reference, and
@@ -72,10 +74,12 @@ leaves the foreground. There is no internet permission.
    not enter the signal at all.
 5. The heading is only read while the screen faces sideways, within 45° of the
    horizon: a phone lying flat or facing the ceiling has no meaningful left turn.
-6. A tap, a launcher content change, or pulling down the shade hides the fold
-   instantly and re-runs step 3, rate limited to one recalibration per 1.5 s.
-   Leaving the launcher abandons any calibration in progress, so a centre is never
-   committed from a pose found inside another app.
+6. A tap, or pulling down the shade, hides the fold instantly and re-runs step 3,
+   rate limited to one recalibration per 1.2 s. Launcher content changes only count
+   while the fold is actually on screen: the clock and the At a Glance card repaint
+   by themselves, and interrupting for those would make the effect blink. Leaving
+   the launcher abandons any calibration in progress, so a centre is never committed
+   from a pose found inside another app.
 
 ## Turning it on
 
