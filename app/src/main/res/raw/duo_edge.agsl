@@ -1,0 +1,68 @@
+// Edge fold for the home screen — AGSL port of Atomicx7/Duo-animation's
+// duo_fold.agsl (itself a port of DuoLikeAnimation's DuoFold.metal).
+//
+// The captured frame is a plane behind the glass. The glass rotates by
+// `tiltDegrees` about a vertical hinge at one screen edge; the free edge recedes
+// into the body. Per pixel we trace the eye ray through the glass to the plane,
+// blur with a Vogel disk whose radius grows with the glass/plane gap, dim in
+// proportion to the blur, and return black where the kernel misses the plane.
+//
+// The plane sits behind the glass, so t > 1: content is compressed toward the
+// eye and the free edge runs past the screen — that is what makes it bend inward
+// rather than stretch outward.
+
+uniform shader content;
+uniform float2 resolution;      // screen px
+uniform float2 contentScale;    // canvas px -> bitmap px
+uniform float hingeX;           // screen edge the glass rotates about
+uniform float side;             // +1 hinge at left, -1 hinge at right
+uniform float tiltDegrees;
+uniform float eyeDistancePx;
+uniform float blurSpread;
+uniform float darkening;
+
+const float GOLDEN_ANGLE = 2.39996322972865332;
+const float TWO_PI = 6.28318530717958648;
+
+half4 main(float2 fragCoord) {
+    float tilt = radians(clamp(abs(tiltDegrees), 0.0, 45.0));
+    if (tilt < 1e-5) {
+        return content.eval(fragCoord * contentScale);
+    }
+
+    float d = abs(fragCoord.x - hingeX);
+    float2 glass = float2(hingeX + side * d * cos(tilt), fragCoord.y);
+    float gap = d * sin(tilt);
+
+    float2 eye = resolution * 0.5;
+    float t = (eyeDistancePx + gap) / eyeDistancePx;
+    float2 hit = eye + (glass - eye) * t;
+
+    float radius = blurSpread * gap;
+
+    if (hit.x < -radius || hit.y < -radius ||
+        hit.x > resolution.x + radius || hit.y > resolution.y + radius) {
+        return half4(0.0, 0.0, 0.0, 1.0);
+    }
+
+    float atten = max(1.0 - darkening * radius, 0.0);
+
+    if (radius < 0.5) {
+        return content.eval(hit * contentScale) * half(atten);
+    }
+
+    float tapsF = clamp(radius * 1.5, 6.0, 12.0);
+    float rotation = fract(sin(dot(fragCoord, float2(12.9898, 78.233))) * 43758.5453) * TWO_PI;
+    half3 sum = half3(0.0);
+    float wsum = 0.0;
+    for (int i = 0; i < 12; i++) {
+        float fi = float(i);
+        float w = 1.0 - step(tapsF, fi);
+        float r = radius * sqrt((fi + 0.5) / tapsF);
+        float a = fi * GOLDEN_ANGLE + rotation;
+        sum += content.eval((hit + r * float2(cos(a), sin(a))) * contentScale).rgb * half(w);
+        wsum += w;
+    }
+    half3 avg = sum / half(max(wsum, 1.0));
+    return half4(avg * half(atten), 1.0);
+}
