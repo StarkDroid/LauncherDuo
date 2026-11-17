@@ -52,6 +52,17 @@ class TiltTracker(
     private var hasSample = false
     private var hasPrevious = false
     private var armed = false
+    private var pendingCentre = true
+
+    // Multi-pass calibration window.
+    private var calibrating = false
+    private var calibStart = 0L
+    private var calibMin = 0f
+    private var calibMax = 0f
+    private var calibCount = 0
+
+    /** Reports "start" when a recalibration begins and "ready" when it settles. */
+    var onStatus: ((String) -> Unit)? = null
     private var lastTimestamp = 0L
     private var stillSince = 0L
 
@@ -65,7 +76,6 @@ class TiltTracker(
     private var depth = 0f
     private var idle = false
     private var stillScore = 0f
-    private var lastLog = 0L
 
     fun start(): Boolean {
         val s = sensor
@@ -85,6 +95,27 @@ class TiltTracker(
     }
 
     fun isArmed(): Boolean = armed
+
+    /** Ask for a fresh centre on the next steady, upright hold. */
+    fun requestRecentre() {
+        pendingCentre = true
+        armed = false
+        primed = false
+    }
+
+    /**
+     * Stop, watch the sensor for a moment, and only then adopt a centre. A single
+     * sample can catch the phone mid-motion, which is what made the fold resume
+     * from a wrong zero after a touch.
+     */
+    fun beginRecalibration() {
+        calibrating = true
+        armed = false
+        primed = false
+        depth = 0f
+        DepthEngine.publishCentered(false)
+        DepthEngine.reset()
+    }
 
     /** Adopt the current pose as neutral (Set neutral button / first hold). */
     fun calibrate() {
@@ -165,28 +196,67 @@ class TiltTracker(
 
         val tilt = filtered
 
-        // Idle handling. Once the phone is held still it is re-zeroed once and
-        // latched: the effect stays at zero until the phone actually leaves that
-        // pose by REENGAGE_DEG. Without the latch, sensor noise around the
-        // stillness threshold made it flicker between reset and warped.
-        if (settled && upright) {
-            if (!idle) {
-                calibrate()
-                depth = 0f
-                idle = true
-                DepthEngine.publishCentered(true)
+        // With the screen facing the ceiling the normal is parallel to gravity,
+        // so atan2(x, z) is ill-conditioned and reports a phantom yaw. Nothing is
+        // published unless the device is roughly vertical.
+        if (!upright) {
+            depth = 0f
+            DepthEngine.publishCentered(false)
+            onChange(0f, 0f)
+            return
+        }
+
+        // One centre per home visit. Auto-recentring on "still" was the cause of
+        // the effect pumping: a slow yaw reads as still, gets adopted as the new
+        // zero, the bend drops, then grows again. Now the centre is captured once,
+        // when the phone is genuinely held still and upright, and only moves when
+        // the user asks for it.
+        // The centre is taken on the next sample after a request — arriving on
+        // the home screen, or a touch — rather than after a stillness timer, so
+        // there is no dead window where yaw does nothing.
+        if (calibrating) {
+            val yawNow = yawFromNeutral()
+            val t = SystemClock.elapsedRealtime()
+            if (calibStart == 0L) {
+                calibStart = t
+                calibMin = yawNow
+                calibMax = yawNow
+                calibCount = 0
+                onStatus?.invoke("start")
+            }
+            calibMin = minOf(calibMin, yawNow)
+            calibMax = maxOf(calibMax, yawNow)
+            calibCount++
+
+            if (t - calibStart >= CALIBRATION_MS) {
+                val steady = calibMax - calibMin <= CALIB_TOLERANCE_DEG && calibCount >= 8
+                if (steady) {
+                    calibrate()
+                    calibrating = false
+                    armed = true
+                    depth = 0f
+                    DepthEngine.publishCentered(true)
+                    onStatus?.invoke("ready")
+                } else {
+                    // Still moving: restart the window instead of guessing.
+                    calibStart = 0L
+                }
             }
             onChange(0f, 0f)
             return
         }
-        // Leaving the latch needs both a real departure and a real movement,
-        // so tremor around the centre cannot re-trigger the warp.
-        if (idle) {
-            if (abs(tilt) < REENGAGE_DEG || stillScore > STILL_EXIT) {
-                onChange(0f, 0f)
-                return
-            }
-            idle = false
+        if (pendingCentre) {
+            calibrate()
+            depth = 0f
+            pendingCentre = false
+            armed = true
+            DepthEngine.publishCentered(true)
+            onChange(0f, 0f)
+            return
+        }
+        if (!armed) {
+            onChange(0f, 0f)
+            return
         }
 
         val target = smoothstep(DEAD_ZONE_DEG, DepthEngine.maxAngle, abs(tilt))
@@ -194,17 +264,6 @@ class TiltTracker(
         // should arrive and leave slowly.
         val a = 1f - exp(-dt / DEPTH_TAU_S).toFloat()
         depth += (target - depth) * a
-        if (now - lastLog > 500L) {
-            lastLog = now
-            android.util.Log.d(
-                "TunerDepth",
-                "speed=" + String.format("%.1f", speed) +
-                    " stillScore=" + String.format("%.2f", stillScore) +
-                    " idle=" + idle +
-                    " tilt=" + String.format("%.1f", tilt) +
-                    " depth=" + String.format("%.2f", depth),
-            )
-        }
         onChange(tilt, depth)
     }
 
@@ -276,7 +335,10 @@ class TiltTracker(
 
         const val STILL_SPEED_DEG_S = 8f
         const val STILL_MS = 1000L
-        const val DEAD_ZONE_DEG = 8f
+        const val DEAD_ZONE_DEG = 10f
+        const val RECENTRE_BAND_DEG = 3f
+        const val CALIBRATION_MS = 900L
+        const val CALIB_TOLERANCE_DEG = 3f
 
         // One-euro tuning.
         const val MIN_CUTOFF = 0.7f
@@ -284,7 +346,7 @@ class TiltTracker(
         const val DERIVATIVE_CUTOFF = 1.0f
 
         // Drift washout.
-        const val DEPTH_TAU_S = 0.22f
+        const val DEPTH_TAU_S = 0.30f
         /** Leaving this much tilt from the latched centre re-engages the effect. */
         const val REENGAGE_DEG = 5f
 

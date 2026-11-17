@@ -20,12 +20,9 @@ class DuoViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var accessibility by mutableStateOf(GestureService.isRunning())
         private set
-    var centred by mutableStateOf(DepthEngine.centered)
-        private set
 
     fun refresh() {
         accessibility = GestureService.isRunning()
-        centred = DepthEngine.centered
         enabled = prefs.getBoolean(GestureService.KEY_ENABLED, false)
     }
 
@@ -47,8 +44,4 @@ class DuoViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putFloat(GestureService.KEY_STRENGTH, value).apply()
     }
 
-    fun recentre() {
-        GestureService.recentre()
-        centred = true
-    }
 }

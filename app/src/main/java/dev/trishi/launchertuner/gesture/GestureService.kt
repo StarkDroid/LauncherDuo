@@ -32,10 +32,14 @@ class GestureService : AccessibilityService() {
     private var captureInFlight = false
     private var homeSince = 0L
     private var onHome = false
+    private var lastRecalibrationAt = 0L
 
     private val depthListener: () -> Unit = listener@{
         val view = overlay ?: return@listener
-        val visible = DepthEngine.depth > 0.002f && !isLocked()
+        // The tracker keeps publishing while you are in any app, so the gate has
+        // to be checked here as well: nothing is drawn unless the launcher owns
+        // the foreground.
+        val visible = onHome && DepthEngine.depth > 0.002f && !isLocked()
         val wanted = if (visible) View.VISIBLE else View.INVISIBLE
         if (view.visibility != wanted) view.visibility = wanted
         if (visible) {
@@ -51,17 +55,44 @@ class GestureService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         tilt = TiltTracker(this) { angle, depth -> DepthEngine.publishTilt(angle, depth) }
+        tilt.onStatus = { state ->
+            val text = if (state == "start") "Recalibrating the fold…" else "Fold ready"
+            android.widget.Toast.makeText(applicationContext, text, android.widget.Toast.LENGTH_SHORT).show()
+        }
         DepthEngine.addListener(depthListener)
         registerScreenReceiver()
         apply()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val type = event?.eventType ?: return
+        val interaction = type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+        if (interaction) {
+            // Content changes also fire from idle animations, so re-learning is
+            // rate limited rather than automatic on every event.
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastRecalibrationAt < RECALIBRATE_COOLDOWN_MS) return
+            lastRecalibrationAt = now
+            // Any interaction kills the fold at once, then re-learns the pose
+            // over a short window before the bend is allowed again.
+            overlay?.visibility = View.INVISIBLE
+            tilt.beginRecalibration()
+            return
+        }
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg == "com.android.systemui" && !isLocked()) return
+        if (pkg == packageName || pkg == "com.android.systemui" || pkg == "android") return
         applyHome(pkg == LAUNCHER)
     }
+
+    /**
+     * The active window, asked directly. Window-state events are not delivered
+     * reliably after the service is re-bound, and a stale "on home" flag made the
+     * overlay appear inside this app; polling the package is deterministic.
+     */
+    private fun foregroundPackage(): String? =
+        runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
 
     override fun onInterrupt() = Unit
 
@@ -85,6 +116,9 @@ class GestureService : AccessibilityService() {
             return
         }
         DepthEngine.enabled = true
+        DepthEngine.reset()
+        DepthEngine.clearFrame()
+        tilt.beginRecalibration()
         if (overlay == null) addOverlay()
         if (tilt.start()) startCaptureLoop()
     }
@@ -127,6 +161,13 @@ class GestureService : AccessibilityService() {
     }
 
     private fun captureLoop() {
+        foregroundPackage()?.let { pkg ->
+            // Ignore transient framework windows; only a real app package can
+            // change the answer.
+            if (pkg != packageName && pkg != "com.android.systemui" && pkg != "android") {
+                applyHome(pkg == LAUNCHER)
+            }
+        }
         val now = SystemClock.elapsedRealtime()
         val settled = homeSince != 0L && now - homeSince > SETTLE_MS
         val needsFrame = DepthEngine.frame == null || DepthEngine.depth < 0.02f
@@ -174,6 +215,11 @@ class GestureService : AccessibilityService() {
         if (home == onHome) return
         onHome = home
         homeSince = if (home) SystemClock.elapsedRealtime() else 0L
+        if (home) {
+            // Arriving on the home screen re-learns the pose the same way a
+            // touch does: pause, watch, then commit.
+            tilt.beginRecalibration()
+        }
         if (!home) {
             DepthEngine.clearFrame()
             DepthEngine.reset()
@@ -203,8 +249,9 @@ class GestureService : AccessibilityService() {
         const val KEY_ANGLE = "angle"
         const val KEY_STRENGTH = "strength"
         private const val LAUNCHER = "com.google.android.apps.nexuslauncher"
-        private const val SETTLE_MS = 700L
-        private const val CAPTURE_MS = 450L
+        private const val SETTLE_MS = 250L
+        private const val RECALIBRATE_COOLDOWN_MS = 1500L
+        private const val CAPTURE_MS = 250L
         private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
         @Volatile

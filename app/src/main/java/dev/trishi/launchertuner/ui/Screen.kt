@@ -11,7 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,9 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -32,18 +29,16 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -112,7 +107,7 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
             if (!vm.accessibility) {
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "The effect is drawn over the home screen by an accessibility service, which is also how it takes the one screenshot it needs.",
+                    "The fold is drawn by an accessibility service, which is also how it takes the single screenshot it needs.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -127,7 +122,7 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
 
             if (vm.enabled) {
                 Spacer(Modifier.height(18.dp))
-                Text("How far you tilt", style = MaterialTheme.typography.titleSmall)
+                Text("How far you turn", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "Full bend at ${vm.angle.toInt()}°",
                     style = MaterialTheme.typography.bodySmall,
@@ -153,20 +148,8 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
                     steps = 20,
                 )
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val dot = if (vm.centred) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    Box(Modifier.width(7.dp).height(7.dp).clip(CircleShape).background(dot))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (vm.centred) "Centre locked" else "Hold still to set the centre",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { vm.recentre() }) { Text("Set neutral") }
-                }
                 Text(
-                    "Home screen only. Holding the phone still for a second re-centres it.",
+                    "Home screen only. The pose is re-based when you arrive here and when you touch the screen.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -176,7 +159,7 @@ fun DuoScreen(vm: DuoViewModel = viewModel()) {
     }
 }
 
-/** The gesture, illustrated: a hand holding the phone and rocking it sideways. */
+/** A hand holding the phone and turning it, foreshortened to read as yaw. */
 @Composable
 private fun TiltPreview() {
     val transition = rememberInfiniteTransition(label = "tilt")
@@ -205,8 +188,7 @@ private fun TiltPreview() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Canvas(Modifier.fillMaxWidth().height(210.dp).clipToBounds()) {
-            val pivot = Offset(size.width / 2f, size.height * 0.90f)
-            // Yaw is foreshortening, not rotation: the device narrows as it turns.
+            val pivot = Offset(size.width / 2f, size.height * 0.92f)
             val scaleX = 0.90f + 0.10f * cos(phase * Math.PI.toFloat())
 
             scale(scaleX, 1f, pivot = pivot) {
@@ -215,48 +197,44 @@ private fun TiltPreview() {
                 val cx = size.width / 2f
                 val top = size.height * 0.10f
 
-                // Forearm and palm sit behind the device.
                 drawRoundRect(
                     color = skinShade,
                     topLeft = Offset(cx - phoneW * 0.42f, pivot.y - 10f),
                     size = Size(phoneW * 0.84f, size.height * 0.35f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(26f, 26f),
+                    cornerRadius = CornerRadius(26f, 26f),
                 )
                 drawRoundRect(
                     color = skin,
                     topLeft = Offset(cx - phoneW * 0.60f, top + phoneH * 0.55f),
                     size = Size(phoneW * 1.20f, phoneH * 0.50f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(30f, 30f),
+                    cornerRadius = CornerRadius(30f, 30f),
                 )
 
-                // Device.
                 drawRoundRect(
                     color = body,
                     topLeft = Offset(cx - phoneW / 2f, top),
                     size = Size(phoneW, phoneH),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(20f, 20f),
+                    cornerRadius = CornerRadius(20f, 20f),
                 )
                 drawRoundRect(
                     color = glass,
                     topLeft = Offset(cx - phoneW / 2f + 6f, top + 6f),
                     size = Size(phoneW - 12f, phoneH - 12f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f),
+                    cornerRadius = CornerRadius(16f, 16f),
                 )
-                // Screen content hint.
                 drawRoundRect(
                     color = accent.copy(alpha = 0.35f),
                     topLeft = Offset(cx - phoneW / 2f + 14f, top + phoneH * 0.16f),
                     size = Size(phoneW - 28f, phoneH * 0.10f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f),
+                    cornerRadius = CornerRadius(8f, 8f),
                 )
                 drawRoundRect(
                     color = accent.copy(alpha = 0.18f),
                     topLeft = Offset(cx - phoneW / 2f + 14f, top + phoneH * 0.34f),
                     size = Size(phoneW - 28f, phoneH * 0.34f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f, 12f),
+                    cornerRadius = CornerRadius(12f, 12f),
                 )
 
-                // Fingers wrapping the near edge.
                 val fingerW = phoneW * 0.20f
                 for (i in 0 until 4) {
                     val y = top + phoneH * (0.30f + i * 0.14f)
@@ -264,15 +242,14 @@ private fun TiltPreview() {
                         color = skin,
                         topLeft = Offset(cx - phoneW / 2f - fingerW * 0.55f, y),
                         size = Size(fingerW, phoneH * 0.10f),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(14f, 14f),
+                        cornerRadius = CornerRadius(14f, 14f),
                     )
                 }
-                // Thumb on the far edge.
                 drawRoundRect(
                     color = skin,
                     topLeft = Offset(cx + phoneW / 2f - fingerW * 0.35f, top + phoneH * 0.52f),
                     size = Size(fingerW * 0.95f, phoneH * 0.26f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f),
+                    cornerRadius = CornerRadius(16f, 16f),
                 )
             }
         }
