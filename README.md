@@ -158,18 +158,6 @@ The frame is a still image captured while flat, so animations at the edge freeze
 while the effect is visible. There are no live previews of other apps because
 task snapshots are not readable without root.
 
-## The mark
-
-<p align="center">
-  <img src="docs/brand/launcher-duo-icon-192.png" width="96" alt="Launcher DUO icon">
-</p>
-
-A **D** whose hinge edge stays pinned, whose glass leaves the panel at a thin
-sliver, and whose far side is foreshortened — the effect, drawn as a letter. Ink
-`#0B1220`, hinge `#F4F7FB`, glass `#7CE8FF`. Files, palette and clear-space rules are
-in [docs/brand](docs/brand). The adaptive icon is
-`app/src/main/res/drawable/ic_launcher_foreground.xml`.
-
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
