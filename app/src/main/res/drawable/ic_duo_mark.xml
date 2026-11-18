@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The DUO mark, one colour: hinge stem, sliver, bent pane. Used in-app, where it is tinted. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+
+    <path
+        android:fillColor="#000000"
+        android:fillType="evenOdd"
+        android:pathData="M46,40H90V216H46Z M110,40H132C178,40 210,76 210,128C210,180 178,216 132,216H110Z M110,74H132C164,74 180,98 180,128C180,158 164,182 132,182H110Z" />
+</vector>

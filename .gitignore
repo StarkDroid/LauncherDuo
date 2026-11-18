@@ -6,3 +6,13 @@ local.properties
 .kotlin/
 .DS_Store
 captures/
+
+# Release signing material — never commit. See docs/SIGNING.md.
+keystore.properties
+keystore/
+*.jks
+*.keystore
+
+# Local tooling
+.serena/
+dist/

@@ -1,9 +1,16 @@
+![Launcher DUO — a fold in your home screen](docs/brand/launcher-duo-banner.png)
+
 # Launcher DUO
 
-A fold effect for the Android home screen. Tilting the phone bends the screen into
-the edge you tilt toward: the picture compresses, frosts and darkens, with a thin
-black sliver where the glass leaves the panel. The opposite edge is the hinge and
-stays pinned and sharp, so there is no seam.
+**An experimental, open-source replica of the iPhone Fold DUO flex animation — on Android, and only for fun.**
+
+Tilting the phone bends the home screen into the edge you tilt toward: the picture
+compresses, frosts and darkens, with a thin black sliver where the glass leaves the
+panel. The opposite edge is the hinge and stays pinned and sharp, so there is no seam.
+
+[![Download the APK](https://img.shields.io/github/v/release/StarkDroid/LauncherDuo?label=download%20APK&color=7CE8FF)](https://github.com/StarkDroid/LauncherDuo/releases/latest)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-7CE8FF)](LICENSE)
+[![Android 12+](https://img.shields.io/badge/Android-12%2B-0B1220?colorA=0B1220)](https://developer.android.com/about/versions/12)
 
 Nothing is replaced. The launcher keeps working underneath; the effect is an
 overlay that is only visible while you tilt.
@@ -124,6 +131,16 @@ switch has to be flipped in the app. That is deliberate: enabling it starts a fr
 calibration of how the phone is being held, so the fold is measured against the
 pose you are actually using rather than one captured days ago.
 
+## Install
+
+Download `LauncherDUO-0.1.0.apk` from [Releases](https://github.com/StarkDroid/LauncherDuo/releases),
+open it on the phone and enable **Launcher DUO effect** under Settings → Accessibility.
+No root, no Shizuku, no ADB.
+
+- Package: `dev.trishi.launchertuner`
+- Android 12 (API 31) and up
+- Signed with the maintainer's release key — the certificate SHA-256 is in the release notes
+
 ## Build
 
 ```bash
@@ -141,6 +158,22 @@ The frame is a still image captured while flat, so animations at the edge freeze
 while the effect is visible. There are no live previews of other apps because
 task snapshots are not readable without root.
 
+## The mark
+
+<p align="center">
+  <img src="docs/brand/launcher-duo-icon-192.png" width="96" alt="Launcher DUO icon">
+</p>
+
+A **D** whose hinge edge stays pinned, whose glass leaves the panel at a thin
+sliver, and whose far side is foreshortened — the effect, drawn as a letter. Ink
+`#0B1220`, hinge `#F4F7FB`, glass `#7CE8FF`. Files, palette and clear-space rules are
+in [docs/brand](docs/brand). The adaptive icon is
+`app/src/main/res/drawable/ic_launcher_foreground.xml`.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+Launcher DUO is an unofficial experiment. It is not affiliated with, endorsed by or
+sponsored by Apple; no Apple code, assets or trademarks are used. "iPhone" is a
+trademark of Apple Inc.

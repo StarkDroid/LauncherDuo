@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="title">
+  <title id="title">Launcher DUO</title>
+  <rect width="1280" height="640" fill="#0B1220"/>
+  <!-- The mark, two-tone: pinned hinge, folding glass. -->
+  <g transform="translate(96 231) scale(1.35)">
+    <path fill="#F4F7FB" d="M46 40 H90 V216 H46 Z"/>
+    <path fill="#7CE8FF" fill-rule="evenodd" d="M110 40 H132 C178 40 210 76 210 128 C210 180 178 216 132 216 H110 Z M110 74 H132 C164 74 180 98 180 128 C180 158 164 182 132 182 H110 Z"/>
+  </g>
+  <g font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+    <text x="440" y="306" fill="#F4F7FB" font-size="88" font-weight="600" letter-spacing="-3">Launcher DUO</text>
+    <text x="444" y="366" fill="#A8B6CC" font-size="32">A fold in your home screen.</text>
+    <text x="444" y="414" fill="#7CE8FF" font-size="20" letter-spacing="2">EXPERIMENTAL · OPEN SOURCE · ANDROID 12+</text>
+  </g>
+</svg>

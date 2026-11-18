@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="title">
+  <title id="title">Launcher DUO symbol</title>
+  <!-- Hinge stem: the edge that stays pinned and sharp. -->
+  <path fill="#0B1220" d="M46 40 H90 V216 H46 Z"/>
+  <!-- Bent pane: a D bowl foreshortened at its far edge, a sliver of glass between it and the hinge. -->
+  <path fill="#0B1220" fill-rule="evenodd" d="M110 40 H132 C178 40 210 76 210 128 C210 180 178 216 132 216 H110 Z M110 74 H132 C164 74 180 98 180 128 C180 158 164 182 132 182 H110 Z"/>
+</svg>
